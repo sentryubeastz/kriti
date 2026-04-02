@@ -5,12 +5,33 @@
   "description": "Get word meanings and translations from selected text on any webpage, with local note storage",
   "permissions": [
     "activeTab",
-    "storage"
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://*.google.com/*"
   ],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["src/content/content.js"]
+      "js": ["src/content/content.js"],
+      "all_frames": true,
+      "match_about_blank": true
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/pdf-banner/banner.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "pdfjs/*",
+        "pdfjs/**/*"
+      ],
+      "matches": ["<all_urls>"]
     }
   ],
   "action": {
