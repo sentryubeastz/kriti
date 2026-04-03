@@ -198,6 +198,18 @@ function renderNotes() {
       .map((note, index) => ({ ...ensureNoteDefaults(note), _index: index }))
       .sort(sortNotesForFolder);
 
+    let pinnedPosition = 0;
+    let nonPinnedPosition = 0;
+    indexedNotes.forEach((note) => {
+      if (note.pinned) {
+        pinnedPosition += 1;
+        note._positionLabel = `📌${pinnedPosition}`;
+      } else {
+        nonPinnedPosition += 1;
+        note._positionLabel = String(nonPinnedPosition);
+      }
+    });
+
     const folderMatches = hasQuery ? matchesQuery(pageTitle, query) : true;
     const visibleNotes = hasQuery
       ? indexedNotes.filter((note) => folderMatches || noteMatchesQuery(note, query))
@@ -427,6 +439,26 @@ function createWordCard(pageTitle, note, query = '') {
   dragHandle.textContent = '⠿';
   dragHandle.setAttribute('aria-hidden', 'true');
 
+  const positionBadge = document.createElement('span');
+  positionBadge.className = 'word-position-badge';
+  positionBadge.textContent = note._positionLabel || '';
+  positionBadge.style.cssText = [
+    'display:inline-flex',
+    'align-items:center',
+    'justify-content:center',
+    'min-width:22px',
+    'height:22px',
+    'padding:0 6px',
+    'border-radius:999px',
+    'background:#e5e7eb',
+    'color:#6b7280',
+    'font-size:11px',
+    'font-weight:700',
+    'line-height:1',
+    'margin-right:8px',
+    'flex-shrink:0'
+  ].join(';');
+
   const menuWrap = document.createElement('div');
   menuWrap.className = 'menu-wrap';
 
@@ -526,6 +558,7 @@ function createWordCard(pageTitle, note, query = '') {
   menuWrap.appendChild(menuBtn);
   menuWrap.appendChild(menu);
   top.appendChild(dragHandle);
+  top.appendChild(positionBadge);
   top.appendChild(word);
 
   const noteType = String(note.type || '').toLowerCase();
@@ -804,10 +837,25 @@ async function addWordToFolder(pageTitle, values, addButton) {
   const word = String(values.word || '').trim();
   const personalNotes = String(values.personalNotes || '').trim();
   let definition = String(values.definition || '').trim();
+  const normalizedWord = word.toLowerCase();
 
   if (!word) {
     showToast('Word is required');
     return;
+  }
+
+  const foldersWithDuplicate = Object.entries(notesState || {})
+    .filter(([, list]) => Array.isArray(list) && list.some((note) => String(note && note.word ? note.word : '').trim().toLowerCase() === normalizedWord))
+    .map(([title]) => title);
+
+  if (foldersWithDuplicate.includes(pageTitle)) {
+    showToast('This word already exists in this folder');
+    return;
+  }
+
+  const otherDuplicates = foldersWithDuplicate.filter((title) => title !== pageTitle);
+  if (otherDuplicates.length > 0) {
+    showToast(`Word also exists in: ${otherDuplicates.join(', ')}`);
   }
 
   if (addButton) {
@@ -1162,6 +1210,8 @@ function getFolderMetaMap() {
 }
 
 function getSortedFolders() {
+  const orderLookup = new Map(folderOrderState.map((title, index) => [title, index]));
+
   return Array.from(getFolderMetaMap().values()).sort((a, b) => {
     const aPinned = isFolderPinned(a.title);
     const bPinned = isFolderPinned(b.title);
@@ -1169,26 +1219,10 @@ function getSortedFolders() {
       return aPinned ? -1 : 1;
     }
 
-    if (aPinned && bPinned) {
-      const aPinIndex = pinnedFoldersState.indexOf(a.title);
-      const bPinIndex = pinnedFoldersState.indexOf(b.title);
-      if (aPinIndex !== bPinIndex) {
-        return aPinIndex - bPinIndex;
-      }
-    }
-
-    const getLatestFolderActivity = (folderMeta) => {
-      const notes = Array.isArray(folderMeta.notes) ? folderMeta.notes : [];
-      return notes.reduce((latest, note) => {
-        const ts = Date.parse(note && note.timestamp ? note.timestamp : '');
-        return Number.isFinite(ts) ? Math.max(latest, ts) : latest;
-      }, 0);
-    };
-
-    const aLatest = getLatestFolderActivity(a);
-    const bLatest = getLatestFolderActivity(b);
-    if (aLatest !== bLatest) {
-      return bLatest - aLatest;
+    const aOrder = orderLookup.has(a.title) ? orderLookup.get(a.title) : Number.MAX_SAFE_INTEGER;
+    const bOrder = orderLookup.has(b.title) ? orderLookup.get(b.title) : Number.MAX_SAFE_INTEGER;
+    if (aOrder !== bOrder) {
+      return aOrder - bOrder;
     }
 
     return a.title.localeCompare(b.title);
@@ -1686,25 +1720,6 @@ function sortNotesForFolder(a, b) {
   const bPinned = !!b.pinned;
   if (aPinned !== bPinned) {
     return aPinned ? -1 : 1;
-  }
-
-  const parseTs = (value) => {
-    const ts = Date.parse(value || '');
-    return Number.isFinite(ts) ? ts : 0;
-  };
-
-  if (aPinned && bPinned) {
-    const aPinnedAt = parseTs(a.pinnedAt);
-    const bPinnedAt = parseTs(b.pinnedAt);
-    if (aPinnedAt !== bPinnedAt) {
-      return bPinnedAt - aPinnedAt;
-    }
-  }
-
-  const aTimestamp = parseTs(a.timestamp);
-  const bTimestamp = parseTs(b.timestamp);
-  if (aTimestamp !== bTimestamp) {
-    return bTimestamp - aTimestamp;
   }
 
   return (a._index || 0) - (b._index || 0);

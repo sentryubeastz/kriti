@@ -710,6 +710,11 @@ function closeModal() {
     window.speechSynthesis.cancel();
   }
   if (modal) {
+    if (modal._confirmSaveTimer) {
+      clearTimeout(modal._confirmSaveTimer);
+      modal._confirmSaveTimer = null;
+    }
+    delete modal.dataset.confirmSave;
     modal.remove();
     modal = null;
   }

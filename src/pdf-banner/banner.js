@@ -1,5 +1,15 @@
 // Kriti PDF banner: prompts users to open PDFs in Kriti's bundled viewer.
 (function initKritiPdfBanner() {
+  if (typeof chrome === 'undefined' ||
+      !chrome.runtime ||
+      !chrome.runtime.id) {
+    return;
+  }
+
+  function isRuntimeAlive() {
+    return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id;
+  }
+
   function isPdfUrl(url) {
     if (!url) return false;
     const normalized = url.split('#')[0].split('?')[0].toLowerCase();
@@ -136,20 +146,53 @@
     const btnText = document.createElement('span');
     btnText.textContent = 'Open with Kriti';
     const btnArrow = document.createElement('span');
-    btnArrow.textContent = '→';
+    btnArrow.innerHTML = '&#8594;';
     btnArrow.style.cssText = 'font-size:14px;line-height:1';
     button.appendChild(btnText);
     button.appendChild(btnArrow);
 
-    button.addEventListener('click', () => {
-      if (typeof chrome === 'undefined' || !chrome.runtime) {
-        alert('Please open this PDF from a website, not from your local files. Local PDFs cannot be opened with Kriti due to browser security restrictions.');
+    let refreshPromptShown = false;
+    let healthCheckTimer = null;
+
+    function showRefreshPrompt() {
+      if (refreshPromptShown) {
         return;
       }
-      const viewerUrl = chrome.runtime.getURL('pdfjs/web/viewer.html');
-      const targetUrl = viewerUrl + '?file=' + encodeURIComponent(window.location.href);
-      window.open(targetUrl, '_blank', 'noopener');
-    });
+      refreshPromptShown = true;
+
+      text.textContent = '⚠ Kriti needs a quick refresh to work';
+      banner.style.background = 'linear-gradient(135deg, #f59e0b, #d97706)';
+
+      button.innerHTML = '';
+      const refreshText = document.createElement('span');
+      refreshText.textContent = 'Refresh Page';
+      button.appendChild(refreshText);
+      button.onclick = () => {
+        window.location.reload();
+      };
+    }
+
+    function handleOpenClick() {
+      try {
+        if (!isRuntimeAlive()) {
+          showRefreshPrompt();
+          return;
+        }
+
+        const viewerUrl = chrome.runtime.getURL('pdfjs/web/viewer.html');
+        window.open(viewerUrl + '?file=' + encodeURIComponent(window.location.href), '_blank', 'noopener');
+      } catch (e) {
+        showRefreshPrompt();
+      }
+    }
+
+    button.onclick = handleOpenClick;
+
+    healthCheckTimer = window.setInterval(() => {
+      if (!isRuntimeAlive()) {
+        showRefreshPrompt();
+      }
+    }, 10000);
 
     // Close / dismiss button
     const closeBtn = document.createElement('button');
@@ -168,6 +211,10 @@
     closeBtn.addEventListener('click', () => {
       banner.classList.add('dismiss');
       banner.addEventListener('animationend', () => {
+        if (healthCheckTimer) {
+          clearInterval(healthCheckTimer);
+          healthCheckTimer = null;
+        }
         if (document.body) {
           const current = parseFloat(document.body.style.paddingTop) || 0;
           const bh = banner.offsetHeight;
