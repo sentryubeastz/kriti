@@ -593,6 +593,70 @@ function saveWord(modalElement) {
     }
 
     const notes = result.notes || {};
+    const wordLower = String(word || '').toLowerCase().trim();
+    const saveBtn = modalElement.querySelector('.kriti-save-btn');
+
+    // Check if word exists in same folder
+    const currentFolderWords = notes[pageTitle] || [];
+    const existsInSameFolder = currentFolderWords.some(
+      (n) => String((n && n.word) || '').toLowerCase().trim() === wordLower
+    );
+
+    if (existsInSameFolder) {
+      if (saveBtn) {
+        saveBtn.textContent = '⚠ Already in this folder';
+        saveBtn.style.background = '#f59e0b';
+        setTimeout(() => {
+          if (!saveBtn.isConnected) return;
+          saveBtn.textContent = 'Save to Notes';
+          saveBtn.style.background = '';
+        }, 2500);
+      }
+      return;
+    }
+
+    // Check if word exists in OTHER folders
+    const otherFolder = Object.keys(notes).find((folder) =>
+      folder !== pageTitle &&
+      (notes[folder] || []).some(
+        (n) => String((n && n.word) || '').toLowerCase().trim() === wordLower
+      )
+    );
+
+    if (otherFolder && !modalElement.dataset.confirmSave) {
+      if (saveBtn) {
+        const shortFolder = otherFolder.length > 15 ? `${otherFolder.substring(0, 15)}...` : otherFolder;
+        saveBtn.textContent = `⚠ Exists in "${shortFolder}" - Click to save anyway`;
+        saveBtn.style.background = '#f59e0b';
+        saveBtn.style.fontSize = '11px';
+        modalElement.dataset.confirmSave = 'true';
+
+        if (modalElement._confirmSaveTimer) {
+          clearTimeout(modalElement._confirmSaveTimer);
+        }
+        modalElement._confirmSaveTimer = setTimeout(() => {
+          if (!saveBtn.isConnected) return;
+          saveBtn.textContent = 'Save to Notes';
+          saveBtn.style.background = '';
+          saveBtn.style.fontSize = '';
+          delete modalElement.dataset.confirmSave;
+          modalElement._confirmSaveTimer = null;
+        }, 3000);
+      }
+      return;
+    }
+
+    // Clear confirm flag and proceed to save
+    delete modalElement.dataset.confirmSave;
+    if (modalElement._confirmSaveTimer) {
+      clearTimeout(modalElement._confirmSaveTimer);
+      modalElement._confirmSaveTimer = null;
+    }
+    if (saveBtn) {
+      saveBtn.style.background = '';
+      saveBtn.style.fontSize = '';
+    }
+
     if (!notes[pageTitle]) {
       notes[pageTitle] = [];
     }
@@ -611,20 +675,29 @@ function saveWord(modalElement) {
     chrome.storage.local.set({ notes }, () => {
       if (chrome.runtime.lastError) {
         console.log('Storage set error:', chrome.runtime.lastError);
-        const saveBtn = modalElement.querySelector('.kriti-save-btn');
-        saveBtn.textContent = 'Save failed';
+        if (saveBtn) {
+          saveBtn.textContent = 'Save failed';
+        }
         setTimeout(() => {
+          if (!saveBtn || !saveBtn.isConnected) return;
           saveBtn.textContent = 'Save to Notes';
+          saveBtn.style.background = '';
+          saveBtn.style.fontSize = '';
         }, 1500);
         return;
       }
 
       // Visual feedback
-      const saveBtn = modalElement.querySelector('.kriti-save-btn');
-      const originalText = saveBtn.textContent;
+      if (!saveBtn) {
+        return;
+      }
+      const originalText = 'Save to Notes';
       saveBtn.textContent = '✓ Saved';
       saveBtn.disabled = true;
+      saveBtn.style.background = '';
+      saveBtn.style.fontSize = '';
       setTimeout(() => {
+        if (!saveBtn.isConnected) return;
         saveBtn.textContent = originalText;
         saveBtn.disabled = false;
       }, 2000);

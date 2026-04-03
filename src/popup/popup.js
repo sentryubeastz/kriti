@@ -370,6 +370,10 @@ function renderNotes() {
       }
     });
 
+    if (collapsedFolders[pageTitle]) {
+      notesList.appendChild(createAddWordSection(pageTitle));
+    }
+
     if (visibleNotes.length === 0 && folderMeta.isCustom) {
       const emptyHint = document.createElement('div');
       emptyHint.className = 'custom-empty-hint';
@@ -380,10 +384,6 @@ function renderNotes() {
     visibleNotes.forEach((note) => {
       notesList.appendChild(createWordCard(pageTitle, note, query));
     });
-
-    if (collapsedFolders[pageTitle]) {
-      notesList.appendChild(createAddWordSection(pageTitle));
-    }
 
     folder.appendChild(folderHeader);
     folder.appendChild(notesList);
@@ -681,6 +681,52 @@ function createAddWordSection(pageTitle) {
     });
   });
 
+  const checkDuplicateWord = (rawWord) => {
+    const normalizedWord = String(rawWord || '').trim().toLowerCase();
+    if (!normalizedWord) {
+      return { inCurrent: false, inOther: [] };
+    }
+
+    const foundInFolders = [];
+    Object.entries(notesState || {}).forEach(([folderName, folderNotes]) => {
+      const list = Array.isArray(folderNotes) ? folderNotes : [];
+      const hasMatch = list.some((note) => String(note && note.word ? note.word : '').trim().toLowerCase() === normalizedWord);
+      if (hasMatch) {
+        foundInFolders.push(folderName);
+      }
+    });
+
+    return {
+      inCurrent: foundInFolders.includes(pageTitle),
+      inOther: foundInFolders.filter((folderName) => folderName !== pageTitle)
+    };
+  };
+
+  const applyDuplicateHint = (rawWord) => {
+    const duplicate = checkDuplicateWord(rawWord);
+    if (duplicate.inCurrent) {
+      wordHint.textContent = 'This word already exists in this folder';
+      wordHint.style.color = '#dc2626';
+      addButton.disabled = true;
+      return duplicate;
+    }
+
+    addButton.disabled = false;
+    if (duplicate.inOther.length > 0) {
+      wordHint.textContent = `This word exists in: ${duplicate.inOther.join(', ')}`;
+      wordHint.style.color = '#a16207';
+      return duplicate;
+    }
+
+    wordHint.textContent = '';
+    wordHint.style.color = '#6b7280';
+    return duplicate;
+  };
+
+  wordInput.addEventListener('input', () => {
+    applyDuplicateHint(wordInput.value);
+  });
+
   wordInput.addEventListener('keydown', async (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -694,6 +740,11 @@ function createAddWordSection(pageTitle) {
         return;
       }
 
+      const duplicate = applyDuplicateHint(word);
+      if (duplicate.inCurrent) {
+        return;
+      }
+
       // If definition is already filled in, just move focus
       if (definitionInput.value.trim()) {
         notesInput.focus();
@@ -701,6 +752,7 @@ function createAddWordSection(pageTitle) {
       }
 
       wordHint.textContent = 'Fetching...';
+      wordHint.style.color = '#6b7280';
       definitionInput.placeholder = 'Fetching definition...';
       definitionInput.disabled = true;
       wordInput.disabled = true;
@@ -713,10 +765,17 @@ function createAddWordSection(pageTitle) {
 
       if (definition && definition !== 'Not found') {
         definitionInput.value = definition;
-        wordHint.textContent = '';
+        if (duplicate.inOther.length > 0) {
+          wordHint.textContent = `This word exists in: ${duplicate.inOther.join(', ')}`;
+          wordHint.style.color = '#a16207';
+        } else {
+          wordHint.textContent = '';
+          wordHint.style.color = '#6b7280';
+        }
         notesInput.focus();
       } else {
         wordHint.textContent = 'Definition not found — you can enter it manually';
+        wordHint.style.color = '#6b7280';
         definitionInput.focus();
       }
     }
@@ -1103,8 +1162,6 @@ function getFolderMetaMap() {
 }
 
 function getSortedFolders() {
-  const orderLookup = new Map(folderOrderState.map((title, index) => [title, index]));
-
   return Array.from(getFolderMetaMap().values()).sort((a, b) => {
     const aPinned = isFolderPinned(a.title);
     const bPinned = isFolderPinned(b.title);
@@ -1112,10 +1169,26 @@ function getSortedFolders() {
       return aPinned ? -1 : 1;
     }
 
-    const aOrder = orderLookup.has(a.title) ? orderLookup.get(a.title) : Number.MAX_SAFE_INTEGER;
-    const bOrder = orderLookup.has(b.title) ? orderLookup.get(b.title) : Number.MAX_SAFE_INTEGER;
-    if (aOrder !== bOrder) {
-      return aOrder - bOrder;
+    if (aPinned && bPinned) {
+      const aPinIndex = pinnedFoldersState.indexOf(a.title);
+      const bPinIndex = pinnedFoldersState.indexOf(b.title);
+      if (aPinIndex !== bPinIndex) {
+        return aPinIndex - bPinIndex;
+      }
+    }
+
+    const getLatestFolderActivity = (folderMeta) => {
+      const notes = Array.isArray(folderMeta.notes) ? folderMeta.notes : [];
+      return notes.reduce((latest, note) => {
+        const ts = Date.parse(note && note.timestamp ? note.timestamp : '');
+        return Number.isFinite(ts) ? Math.max(latest, ts) : latest;
+      }, 0);
+    };
+
+    const aLatest = getLatestFolderActivity(a);
+    const bLatest = getLatestFolderActivity(b);
+    if (aLatest !== bLatest) {
+      return bLatest - aLatest;
     }
 
     return a.title.localeCompare(b.title);
@@ -1577,13 +1650,14 @@ function persistAll(partial, callback) {
 }
 
 function toggleFolderPin(pageTitle) {
-  const set = new Set(pinnedFoldersState);
-  if (set.has(pageTitle)) {
-    set.delete(pageTitle);
+  let nextPinned = Array.isArray(pinnedFoldersState) ? [...pinnedFoldersState] : [];
+  if (nextPinned.includes(pageTitle)) {
+    nextPinned = nextPinned.filter((title) => title !== pageTitle);
   } else {
-    set.add(pageTitle);
+    // Newly pinned folders should appear at the top of pinned folders.
+    nextPinned = [pageTitle, ...nextPinned];
   }
-  persistAll({ pinnedFolders: Array.from(set) });
+  persistAll({ pinnedFolders: nextPinned });
 }
 
 function isFolderPinned(pageTitle) {
@@ -1612,6 +1686,25 @@ function sortNotesForFolder(a, b) {
   const bPinned = !!b.pinned;
   if (aPinned !== bPinned) {
     return aPinned ? -1 : 1;
+  }
+
+  const parseTs = (value) => {
+    const ts = Date.parse(value || '');
+    return Number.isFinite(ts) ? ts : 0;
+  };
+
+  if (aPinned && bPinned) {
+    const aPinnedAt = parseTs(a.pinnedAt);
+    const bPinnedAt = parseTs(b.pinnedAt);
+    if (aPinnedAt !== bPinnedAt) {
+      return bPinnedAt - aPinnedAt;
+    }
+  }
+
+  const aTimestamp = parseTs(a.timestamp);
+  const bTimestamp = parseTs(b.timestamp);
+  if (aTimestamp !== bTimestamp) {
+    return bTimestamp - aTimestamp;
   }
 
   return (a._index || 0) - (b._index || 0);
