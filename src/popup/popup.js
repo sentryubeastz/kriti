@@ -1598,32 +1598,21 @@ function renameFolder(oldTitle) {
 }
 
 function deleteFolder(folderTitle) {
-  const confirmed = confirm(`Delete folder "${folderTitle}"? Words will be moved to Uncategorized.`);
+  const wordCount = Array.isArray(notesState[folderTitle]) ? notesState[folderTitle].length : 0;
+  const confirmMsg = wordCount > 0
+    ? `Delete folder "${folderTitle}" and all ${wordCount} word${wordCount !== 1 ? 's' : ''} in it?`
+    : `Delete folder "${folderTitle}"?`;
+  const confirmed = confirm(confirmMsg);
   if (!confirmed) {
     return;
   }
 
   const updatedNotes = cloneNotes(notesState);
-  const notesToMove = Array.isArray(updatedNotes[folderTitle]) ? updatedNotes[folderTitle] : [];
   delete updatedNotes[folderTitle];
 
-  let updatedCustomFolders = customFoldersState.filter((name) => name !== folderTitle);
-  let updatedPinnedFolders = pinnedFoldersState.filter((name) => name !== folderTitle);
-  let updatedFolderOrder = folderOrderState.filter((name) => name !== folderTitle);
-
-  if (notesToMove.length > 0) {
-    const uncategorized = 'Uncategorized';
-    if (!updatedNotes[uncategorized]) {
-      updatedNotes[uncategorized] = [];
-    }
-    updatedNotes[uncategorized].push(...notesToMove);
-    if (!updatedCustomFolders.includes(uncategorized)) {
-      updatedCustomFolders = [...updatedCustomFolders, uncategorized];
-    }
-    if (!updatedFolderOrder.includes(uncategorized)) {
-      updatedFolderOrder = [...updatedFolderOrder, uncategorized];
-    }
-  }
+  const updatedCustomFolders = customFoldersState.filter((name) => name !== folderTitle);
+  const updatedPinnedFolders = pinnedFoldersState.filter((name) => name !== folderTitle);
+  const updatedFolderOrder = folderOrderState.filter((name) => name !== folderTitle);
 
   persistAll({
     notes: updatedNotes,
